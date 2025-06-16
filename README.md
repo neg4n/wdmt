@@ -2,6 +2,15 @@
 
 **WDMT** /ˌwɪdiˈɛmˈtiː/ (Web Developer Maintenance Tool) is a CLI that securely removes bulky development artefacts such as `node_modules`, `.next`, or `dist`. It focuses on correctness and safety, ensuring that no file outside the intended directory tree is ever touched.
 
+## Preview
+
+
+
+https://github.com/user-attachments/assets/66d4fe38-4503-48c8-b540-a494b653bcfd
+
+
+
+
 ### Motivation
 
 Have you ever seen 200GB+ taken by the System Data on your Mac?
@@ -15,10 +24,9 @@ Large dependency folders and build outputs quickly bloat local check-outs.  Manu
 - **🔒 Symlink Attack Prevention** — Never follows malicious symlinks  
 - **🛡️ Path Traversal Protection** — Blocks `../../../etc/passwd` style attacks  
 - **⚡ Interactive Selection** — Smart path display with multiple view modes  
-- **📊 Progress Visualisation** — Beautiful progress bars powered by Charmbracelet  
+- **📊 Progress Visualisation** — Beautiful progress bars created using [charmbracelet](charm.sh) libraries  
 - **🎯 Secure by Design** — Robust security validation  
 - **📱 Cross-Platform** — Works on macOS, Linux, and Windows  
-- **🔍 Enhanced Path Display** — Smart, condensed, and full path viewing modes with keyboard shortcuts  
 
 ### Quick Start
 
