@@ -58,26 +58,6 @@ func New(workingDir string) (*Cleaner, error) {
 	}, nil
 }
 
-func (c *Cleaner) DeleteTargets(targets []scanner.CleanupTarget) ([]scanner.CleanupTarget, int64, error) {
-	var deletedTargets []scanner.CleanupTarget
-	var totalFreed int64
-
-	for _, target := range targets {
-		if err := c.validatePathSecurity(target.Path); err != nil {
-			continue
-		}
-
-		err := c.secureDeleteDirectory(target.Path)
-		if err != nil {
-			continue
-		}
-
-		deletedTargets = append(deletedTargets, target)
-		totalFreed += target.Size
-	}
-
-	return deletedTargets, totalFreed, nil
-}
 
 func (c *Cleaner) secureDeleteDirectory(path string) error {
 	if err := c.validatePathSecurity(path); err != nil {
@@ -269,17 +249,3 @@ func (c *Cleaner) ValidateTargets(targets []scanner.CleanupTarget) ([]scanner.Cl
 	return validTargets, nil
 }
 
-func formatSize(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
