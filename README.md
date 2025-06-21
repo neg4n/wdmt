@@ -27,6 +27,8 @@ Large dependency folders and build outputs quickly bloat local check-outs.  Manu
 - **📊 Progress Visualisation** — Beautiful progress bars created using [charmbracelet](charm.sh) libraries  
 - **🎯 Secure by Design** — Robust security validation  
 - **📱 Cross-Platform** — Works on macOS, Linux, and Windows  
+- **🔍 Enhanced Path Display** — Smart, condensed, and full path viewing modes with keyboard shortcuts  
+- **📏 Accurate Size Calculation** — Block-based size estimation (4KB blocks) matches actual disk usage
 
 ### Quick Start
 
@@ -51,16 +53,26 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/neg4n/wdm
 
 ### Security Architecture
 
-| Feature | Traditional tools | WDMT |
-|---------|------------------|------|
-| Symlink safety | Often follows symlinks | Never follows symlinks |
-| Path validation | Basic checks | Multi-layer validation |
-| Injection protection | None | UTF-8 & null-byte filtering |
-| Race-condition defence | Vulnerable | Just-in-time validation |
-| Filesystem boundaries | Can cross devices | Device-ID tracking |
+WDMT uses a **two-phase security model** optimized for both performance and safety:
 
-> **Note**  
-> Utilities such as `rimraf` rely on Node.js filesystem calls that may follow symlinks if the caller is not careful. WDMT performs explicit checks on every path component and refuses to delete if any part resolves outside the intended directory.
+#### **Discovery Phase (Scanner)**
+- **🔍 Fast & Minimal Security** — Essential symlink detection for safe directory traversal
+- **⚡ Performance Optimized** — Lightweight validation enables sub-second scanning
+- **👀 User Review Required** — Always displays confirmation screen before deletion
+
+#### **Deletion Phase (Cleaner)**
+- **🛡️ Full Security Suite** — Complete protection when it matters most
+
+| Feature | Traditional tools | WDMT Scanner | WDMT Cleaner |
+|---------|------------------|--------------|--------------|
+| Symlink safety | Often follows symlinks | Essential detection | Never follows symlinks |
+| Path validation | Basic checks | Basic boundary checks | Multi-layer validation |
+| Injection protection | None | N/A (user review) | UTF-8 & null-byte filtering |
+| Race-condition defence | Vulnerable | N/A (user review) | Just-in-time validation |
+| Filesystem boundaries | Can cross devices | N/A (user review) | Device-ID tracking |
+
+> **Important**  
+> The scanner prioritizes speed for discovery, while the cleaner enforces complete security during deletion. **Always review the confirmation screen** to verify what you're deleting, as this is your primary defense against accidental deletions.
 
 ### Supported Targets
 
