@@ -3,14 +3,15 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"wdmt/internal/cleaner"
 	"wdmt/internal/scanner"
 	"wdmt/internal/ui"
 
-	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -18,38 +19,82 @@ var (
 	Version = "1.0.0"
 )
 
-type scanProgressMsg float64
+type scanTickMsg struct{}
 type scanCompleteMsg struct{}
 
 type scanModel struct {
-	progress progress.Model
-	done     bool
+	done          bool
+	animFrame     int
+	barWidth      int
+	ballPosition  int
+	ballDirection int
+	scanStartTime time.Time
+	messages      []string
+	messageIndex  int
+}
+
+var loadingMessages = []string{
+	"Hunting for node_modules monsters...",
+	"Chasing build artifacts in the wild...",
+	"Detecting cache creatures...",
+	"Searching for forgotten dependencies...",
+	"Tracking down temporary files...",
+	"Discovering hidden build outputs...",
+	"Scanning for development debris...",
+	"Finding orphaned test coverage...",
+	"Locating stray distribution files...",
+	"Investigating suspicious .next folders...",
 }
 
 func newScanModel() scanModel {
 	return scanModel{
-		progress: progress.New(
-			progress.WithScaledGradient("#FF7CCB", "#FDFF8C"),
-			progress.WithWidth(20),
-		),
+		done:          false,
+		animFrame:     0,
+		barWidth:      20,
+		ballPosition:  0,
+		ballDirection: 1,
+		scanStartTime: time.Now(),
+		messages:      loadingMessages,
+		messageIndex:  0,
 	}
 }
 
 func (m scanModel) Init() tea.Cmd {
-	return nil
+	return tea.Tick(time.Millisecond*80, func(t time.Time) tea.Msg {
+		return scanTickMsg{}
+	})
 }
 
 func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case scanProgressMsg:
-		return m, m.progress.SetPercent(float64(msg))
+	switch msg.(type) {
+	case scanTickMsg:
+		if !m.done {
+			m.animFrame++
+			
+			// Move the ball
+			m.ballPosition += m.ballDirection
+			
+			// Bounce off walls
+			if m.ballPosition >= m.barWidth-1 {
+				m.ballDirection = -1
+			} else if m.ballPosition <= 0 {
+				m.ballDirection = 1
+			}
+			
+			// Change message every 3 seconds (37 frames * 80ms ≈ 3 seconds)
+			if m.animFrame%37 == 0 && len(m.messages) > 0 {
+				m.messageIndex = (m.messageIndex + 1) % len(m.messages)
+			}
+			
+			return m, tea.Tick(time.Millisecond*80, func(t time.Time) tea.Msg {
+				return scanTickMsg{}
+			})
+		}
+		return m, nil
+		
 	case scanCompleteMsg:
 		m.done = true
 		return m, tea.Quit
-	case progress.FrameMsg:
-		progressModel, cmd := m.progress.Update(msg)
-		m.progress = progressModel.(progress.Model)
-		return m, cmd
 	}
 	return m, nil
 }
@@ -58,7 +103,62 @@ func (m scanModel) View() string {
 	if m.done {
 		return ""
 	}
-	return "\n" + "wdmt scanning... " + m.progress.View() + "\n"
+	
+	// Create the bouncing ball animation with gradient
+	var bar strings.Builder
+	
+	// Define gradient colors for smooth transitions
+	ballColors := []string{"#ff006e", "#fb5607", "#ffbe0b", "#8338ec", "#3a86ff"}
+	
+	// Current ball color
+	ballColor := ballColors[m.animFrame%len(ballColors)]
+	
+	for i := 0; i < m.barWidth; i++ {
+		if i == m.ballPosition {
+			// Bright colored ball
+			styled := lipgloss.NewStyle().Foreground(lipgloss.Color(ballColor)).Render("█")
+			bar.WriteString(styled)
+		} else {
+			// Calculate distance from ball for gradient effect
+			distance := abs(i - m.ballPosition)
+			var char string
+			var color string
+			
+			if distance <= 1 {
+				// Close to ball - brighter
+				char = "▓"
+				color = "#4a5568"
+			} else if distance <= 2 {
+				// Medium distance
+				char = "▒"
+				color = "#2d3748"
+			} else {
+				// Far from ball - dimmer
+				char = "░"
+				color = "#1a202c"
+			}
+			
+			styled := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(char)
+			bar.WriteString(styled)
+		}
+	}
+	
+	// Get current message
+	currentMessage := "scanning directories..."
+	if len(m.messages) > 0 {
+		currentMessage = m.messages[m.messageIndex]
+	}
+	
+	// Format exactly as requested: \n WDMT progress \n message \n
+	return fmt.Sprintf("\nWDMT %s\n\n%s\n\n", bar.String(), currentMessage)
+}
+
+// Helper function to calculate absolute value
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 var rootCmd = &cobra.Command{
@@ -97,9 +197,8 @@ func runCleanup(cmd *cobra.Command, args []string) {
 		}
 		scannerInstance = s
 
-		err = s.ScanWithProgress(func(progress float64) {
-			p.Send(scanProgressMsg(progress))
-		})
+		// Use simple scan without progress reporting - the UI will handle the animation
+		err = s.Scan()
 
 		if err != nil {
 			scanErr = err
@@ -107,9 +206,8 @@ func runCleanup(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		p.Send(scanProgressMsg(1.0))
-
-		time.Sleep(1 * time.Second)
+		// Brief pause to let user see the completion
+		time.Sleep(500 * time.Millisecond)
 		p.Send(scanCompleteMsg{})
 	}()
 
@@ -152,7 +250,7 @@ func performCleanupWithScanner(s *scanner.Scanner) error {
 		return nil
 	}
 
-	interactiveUI := ui.New(validTargets)
+	interactiveUI := ui.NewWithScanner(validTargets, s)
 	interactiveUI.SetCleaner(cleanerInstance)
 	p := tea.NewProgram(interactiveUI.GetModel(), tea.WithAltScreen())
 	_, err = p.Run()

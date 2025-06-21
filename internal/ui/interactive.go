@@ -79,6 +79,7 @@ type Model struct {
 	pathDisplayMode PathDisplayMode
 	workingDir      string
 	scrollOffset    int
+	scanDuration    string
 }
 
 type CleanupItem struct {
@@ -289,6 +290,10 @@ type completionDelayMsg struct{}
 type exitAfterDelayMsg struct{}
 
 func New(targets []scanner.CleanupTarget) *InteractiveUI {
+	return NewWithScanner(targets, nil)
+}
+
+func NewWithScanner(targets []scanner.CleanupTarget, scannerInstance *scanner.Scanner) *InteractiveUI {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(Colors.Primary)
@@ -301,6 +306,11 @@ func New(targets []scanner.CleanupTarget) *InteractiveUI {
 	progressBar := progress.New(progress.WithDefaultGradient())
 	progressBar.PercentageStyle = lipgloss.NewStyle().Foreground(Colors.Success)
 
+	scanDuration := ""
+	if scannerInstance != nil {
+		scanDuration = scannerInstance.GetScanDurationString()
+	}
+
 	model := &Model{
 		state:           StateSelectingTargets,
 		targets:         targets,
@@ -310,6 +320,7 @@ func New(targets []scanner.CleanupTarget) *InteractiveUI {
 		deleteProgress:  make(map[int]*DeleteProgress),
 		pathDisplayMode: PathDisplaySmart,
 		workingDir:      workingDir,
+		scanDuration:    scanDuration,
 	}
 
 	items := make([]list.Item, len(targets))
@@ -698,6 +709,14 @@ func (m *Model) viewSelecting() string {
 	statsContent.WriteString(selectionStyle.Render(selectionInfo))
 
 	statsContent.WriteString(" • ")
+
+	if m.scanDuration != "" {
+		scanInfo := fmt.Sprintf("Scanned in %s", m.scanDuration)
+		statsContent.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#8B5CF6")).
+			Render(scanInfo))
+		statsContent.WriteString(" • ")
+	}
 
 	pathInfo := fmt.Sprintf("Path: %s", m.pathDisplayMode)
 	statsContent.WriteString(lipgloss.NewStyle().
