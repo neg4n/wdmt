@@ -215,7 +215,7 @@ func TestScan(t *testing.T) {
 	}
 }
 
-func TestCalculateDirSize(t *testing.T) {
+func TestCalculateDirSizeConcurrent(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "scanner_test_size_*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -254,10 +254,7 @@ func TestCalculateDirSize(t *testing.T) {
 		t.Fatalf("Failed to create scanner: %v", err)
 	}
 
-	size, err := scanner.calculateDirSize(tempDir)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
+	size := scanner.calculateDirSizeConcurrent(tempDir)
 
 	expectedSize := int64(len(content1) + len(content2) + len(content3)) 
 	if size != expectedSize {
