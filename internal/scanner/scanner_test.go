@@ -215,12 +215,24 @@ func TestScan(t *testing.T) {
 	}
 }
 
-func TestCalculateDirSizeConcurrent(t *testing.T) {
+func TestCalculateDirSize(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "scanner_test_size_*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
+
+	// Change to temp directory to make it the working directory
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	err = os.Chdir(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to change to temp dir: %v", err)
+	}
 
 	testFile1 := filepath.Join(tempDir, "file1.txt")
 	content1 := "hello world" 
@@ -254,11 +266,19 @@ func TestCalculateDirSizeConcurrent(t *testing.T) {
 		t.Fatalf("Failed to create scanner: %v", err)
 	}
 
-	size := scanner.calculateDirSizeConcurrent(tempDir)
+	size := scanner.calculateDirSize(tempDir)
 
-	expectedSize := int64(len(content1) + len(content2) + len(content3)) 
-	if size != expectedSize {
-		t.Errorf("Expected size %d, got %d", expectedSize, size)
+	// With block-based calculation, size should be larger than logical size
+	// due to block allocation (typically 4KB blocks)
+	logicalSize := int64(len(content1) + len(content2) + len(content3))
+	if size < logicalSize {
+		t.Errorf("Block-based size %d should be >= logical size %d", size, logicalSize)
+	}
+	
+	// Reasonable upper bound check (each file gets at least one block)
+	maxExpectedSize := logicalSize + (3 * 4096) // 3 files * typical 4KB block size
+	if size > maxExpectedSize {
+		t.Errorf("Size %d seems too large (logical: %d, max expected: %d)", size, logicalSize, maxExpectedSize)
 	}
 }
 

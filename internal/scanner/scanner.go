@@ -91,18 +91,36 @@ type scanResult struct {
 }
 
 // High-performance directory size calculation using WalkDir
+// Cross-platform approximation of disk usage
 func (s *Scanner) calculateDirSize(dirPath string) int64 {
 	var size int64
+	const blockSize = 4096 // Common filesystem block size (4KB)
 	
 	filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // Continue on errors
 		}
 		
-		// Use DirEntry.Type() to avoid expensive stat calls
-		if !d.Type().IsDir() {
+		// Essential security: Never follow symlinks
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil // Skip symlinks entirely
+		}
+		
+		// Calculate size for regular files
+		if d.Type().IsRegular() {
 			if info, err := d.Info(); err == nil {
-				size += info.Size()
+				fileSize := info.Size()
+				
+				// Approximate disk usage by rounding up to nearest block
+				// This gives a better estimate of actual disk space usage
+				if fileSize == 0 {
+					// Empty files still take up space (directory entry, inode, etc.)
+					size += blockSize
+				} else {
+					// Round up to nearest block boundary
+					blocks := (fileSize + blockSize - 1) / blockSize
+					size += blocks * blockSize
+				}
 			}
 		}
 		
@@ -177,6 +195,11 @@ func (s *Scanner) walkDirectory(dir string, workQueue chan<- workItem) {
 			return nil // Continue on errors
 		}
 		
+		// Essential security: Never follow symlinks
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil // Skip symlinks entirely
+		}
+		
 		// Use DirEntry.Type() to avoid expensive stat calls
 		if d.Type().IsDir() {
 			name := d.Name()
@@ -204,6 +227,11 @@ func (s *Scanner) worker(workQueue <-chan workItem, resultQueue chan<- scanResul
 	
 	for item := range workQueue {
 		name := item.entry.Name()
+		
+		// Essential security: Ensure target is not a symlink
+		if item.entry.Type()&fs.ModeSymlink != 0 {
+			continue // Skip symlinks
+		}
 		
 		if s.isCleanupTarget(name) {
 			// Get target from pool
@@ -261,4 +289,9 @@ func (s *Scanner) GetScanDurationString() string {
 		return fmt.Sprintf("%.1fs", duration.Seconds())
 	}
 	return fmt.Sprintf("%.1fs", duration.Seconds())
+}
+
+// CalculateDirectorySize exposes the directory size calculation for testing
+func (s *Scanner) CalculateDirectorySize(dirPath string) int64 {
+	return s.calculateDirSize(dirPath)
 }
