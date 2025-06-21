@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"wdmt/internal/scanner"
 
@@ -23,7 +24,7 @@ const (
 	StateSelectingTargets
 	StateConfirming
 	StateDeleting
-	StateSummary
+	StateCompletionDelay
 )
 
 type PathDisplayMode int
@@ -77,6 +78,7 @@ type Model struct {
 	cleaner         interface{} 
 	pathDisplayMode PathDisplayMode
 	workingDir      string
+	scrollOffset    int
 }
 
 type CleanupItem struct {
@@ -211,38 +213,19 @@ func (i CleanupItem) formatDescription() string {
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7C3AED")).
-			Background(lipgloss.Color("#1F2937")).
+			Foreground(Colors.Primary).
+			Background(Colors.BgPrimary).
 			Padding(0, 2).
 			MarginBottom(1)
 
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#10B981")).
+			Foreground(Colors.Success).
 			Padding(0, 1).
 			MarginBottom(1)
 
-	containerStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#374151")).
-			Padding(0, 1).
-			MarginBottom(1)
+	containerStyle = HeaderContainerStyle()
 
-	listHeaderStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#10B981")).
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#374151")).
-			Padding(0, 1).
-			MarginBottom(1)
-
-	sectionHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#FBBF24")).
-				BorderStyle(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#374151")).
-				Padding(0, 1).
-				MarginBottom(1)
 
 	normalStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#E5E7EB")).
@@ -288,8 +271,6 @@ var (
 				Padding(0, 1).
 				MarginBottom(1)
 
-	progressBarStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#10B981"))
 
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#9CA3AF")).
@@ -303,11 +284,14 @@ type deleteProgressMsg struct {
 	index    int
 	progress float64
 }
+type progressTickMsg struct{ index int }
+type completionDelayMsg struct{}
+type exitAfterDelayMsg struct{}
 
 func New(targets []scanner.CleanupTarget) *InteractiveUI {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED"))
+	s.Style = lipgloss.NewStyle().Foreground(Colors.Primary)
 
 	workingDir, err := os.Getwd()
 	if err != nil {
@@ -315,7 +299,7 @@ func New(targets []scanner.CleanupTarget) *InteractiveUI {
 	}
 
 	progressBar := progress.New(progress.WithDefaultGradient())
-	progressBar.PercentageStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
+	progressBar.PercentageStyle = lipgloss.NewStyle().Foreground(Colors.Success)
 
 	model := &Model{
 		state:           StateSelectingTargets,
@@ -366,8 +350,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirming(msg)
 		case StateDeleting:
 			return m.updateDeleting(msg)
-		case StateSummary:
-			return m.updateSummary(msg)
+		case StateCompletionDelay:
+			return m.updateCompletionDelay(msg)
 		}
 
 	case errMsg:
@@ -379,6 +363,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			dp.Progress = msg.progress
 		}
 		return m, nil
+
+	case progressTickMsg:
+		if dp, exists := m.deleteProgress[msg.index]; exists && !dp.Done {
+			newProgress := dp.Progress + 0.03
+			if newProgress > 0.95 {
+				newProgress = 0.95 // Cap at 95% until deletion completes
+			}
+			dp.Progress = newProgress
+			// Continue animation
+			return m, m.animateProgress(msg.index)
+		}
+		return m, nil
+
+	case exitAfterDelayMsg:
+		// Print summary to terminal and exit
+		m.printSummaryAndExit()
+		return m, tea.Quit
 
 	case deleteFinishedMsg:
 		if dp, exists := m.deleteProgress[msg.index]; exists {
@@ -398,7 +399,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if allDone {
-			m.state = StateSummary
+			// Move to completion delay state
+			m.state = StateCompletionDelay
+			return m, tea.Tick(time.Second*5, func(t time.Time) tea.Msg {
+				return exitAfterDelayMsg{}
+			})
 		}
 
 		return m, nil
@@ -431,6 +436,7 @@ func (m *Model) updateSelecting(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if len(m.getSelectedTargets()) > 0 {
 			m.state = StateConfirming
+			m.scrollOffset = 0 // Reset scroll when changing states
 		}
 		return m, nil
 	case "a":
@@ -474,9 +480,23 @@ func (m *Model) updateConfirming(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y", "enter":
 		m.state = StateDeleting
+		m.scrollOffset = 0 // Reset scroll when changing states
 		return m, m.startDeletion()
 	case "n", "N", "q", "ctrl+c", "esc":
 		m.state = StateSelectingTargets
+		m.scrollOffset = 0 // Reset scroll when changing states
+		return m, nil
+	case "up", "k":
+		if m.scrollOffset > 0 {
+			m.scrollOffset--
+		}
+		return m, nil
+	case "down", "j":
+		selected, _ := m.getSelectedTargetsWithIndices()
+		maxScroll := len(selected) - (m.height - 8) // Adjust for header and help
+		if maxScroll > 0 && m.scrollOffset < maxScroll {
+			m.scrollOffset++
+		}
 		return m, nil
 	}
 	return m, nil
@@ -486,16 +506,25 @@ func (m *Model) updateDeleting(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "up", "k":
+		if m.scrollOffset > 0 {
+			m.scrollOffset--
+		}
+		return m, nil
+	case "down", "j":
+		maxScroll := len(m.deleteProgress) - (m.height - 8) // Adjust for header and help
+		if maxScroll > 0 && m.scrollOffset < maxScroll {
+			m.scrollOffset++
+		}
+		return m, nil
 	}
 	return m, nil
 }
 
-func (m *Model) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "q", "ctrl+c", "enter", "esc":
-		return m, tea.Quit
-	}
-	return m, nil
+func (m *Model) updateCompletionDelay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Any key press exits immediately
+	m.printSummaryAndExit()
+	return m, tea.Quit
 }
 
 func (m *Model) getSelectedTargets() []scanner.CleanupTarget {
@@ -560,24 +589,47 @@ func (m *Model) startDeletion() tea.Cmd {
 }
 
 func (m *Model) deleteDirectory(index int, target scanner.CleanupTarget) tea.Cmd {
-	return func() tea.Msg {
-		err := os.RemoveAll(target.Path)
-		if err != nil {
-			return errMsg(err)
-		}
+	return tea.Batch(
+		m.animateProgress(index),
+		func() tea.Msg {
+			err := os.RemoveAll(target.Path)
+			if err != nil {
+				return errMsg(err)
+			}
+			return deleteFinishedMsg{index: index}
+		},
+	)
+}
 
-		return deleteFinishedMsg{index: index}
+func (m *Model) animateProgress(index int) tea.Cmd {
+	return tea.Tick(time.Millisecond*50, func(t time.Time) tea.Msg {
+		return progressTickMsg{index: index}
+	})
+}
+
+func (m *Model) printSummaryAndExit() {
+	fmt.Println() // Add a newline after TUI closes
+	
+	if m.deletedCount == 0 {
+		fmt.Println("🚫 No directories deleted")
+	} else {
+		fmt.Printf("✅ Deleted %d directories • %s freed\n", m.deletedCount, formatSize(m.totalFreed))
+		
+		// List deleted directories
+		sortedIndices := m.getSortedProgressIndices()
+		for _, i := range sortedIndices {
+			dp := m.deleteProgress[i]
+			if dp.Done {
+				shortPath := CleanupItem{target: dp.Target, index: i, model: m}.formatTitle()
+				fmt.Printf("  ✗ %s (%s)\n", shortPath, formatSize(dp.Target.Size))
+			}
+		}
 	}
+	fmt.Println()
 }
 
 func (m *Model) View() string {
 	var content strings.Builder
-
-	if m.state == StateSelectingTargets {
-		title := titleStyle.Render("🧹 Web Developer Maintenance Tool")
-		content.WriteString(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, title))
-		content.WriteString("\n\n")
-	}
 
 	switch m.state {
 	case StateScanning:
@@ -588,8 +640,8 @@ func (m *Model) View() string {
 		content.WriteString(m.viewConfirming())
 	case StateDeleting:
 		content.WriteString(m.viewDeleting())
-	case StateSummary:
-		content.WriteString(m.viewSummary())
+	case StateCompletionDelay:
+		content.WriteString(m.viewCompletionDelay())
 	}
 
 	if m.err != nil {
@@ -619,9 +671,11 @@ func (m *Model) viewSelecting() string {
 		allTargetsSize += target.Size
 	}
 
-	selectedCount := len(m.getSelectedTargets())
+	// Calculate selected targets more efficiently
+	selectedTargets := m.getSelectedTargets()
+	selectedCount := len(selectedTargets)
 	var selectedSize int64
-	for _, target := range m.getSelectedTargets() {
+	for _, target := range selectedTargets {
 		selectedSize += target.Size
 	}
 
@@ -629,7 +683,7 @@ func (m *Model) viewSelecting() string {
 
 	mainStats := fmt.Sprintf("💾 %s available", formatSize(allTargetsSize))
 	statsContent.WriteString(lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#10B981")).
+		Foreground(Colors.Success).
 		Bold(true).
 		Render(mainStats))
 
@@ -672,6 +726,7 @@ func (m *Model) viewSelecting() string {
 	return content.String()
 }
 
+
 func (m *Model) viewConfirming() string {
 	var content strings.Builder
 
@@ -681,95 +736,246 @@ func (m *Model) viewConfirming() string {
 		totalSize += target.Size
 	}
 
-	confirmationHeader := fmt.Sprintf("⚠️  Delete %d directories (%s)?", len(selected), formatSize(totalSize))
-	header := warningContainerStyle.Render(confirmationHeader)
-	content.WriteString(header)
-	content.WriteString("\n\n")
+	// Header box with confirmation question (consistent with selection screen)
+	confirmationHeader := fmt.Sprintf("⚠️  Confirm deletion of %d directories (%s)?", len(selected), formatSize(totalSize))
+	styledHeader := warningContainerStyle.Render(confirmationHeader)
+	content.WriteString(styledHeader)
+	content.WriteString("\n")
 
-	for i, target := range selected {
+	// Calculate available height for directory list with scrolling support
+	reservedLines := 5 // Header + help + padding
+	availableHeight := m.height - reservedLines
+	maxVisibleItems := availableHeight - 1 // Leave buffer
+
+	// Scrollable list of directories to be deleted
+	startIdx := m.scrollOffset
+	endIdx := startIdx + maxVisibleItems
+	if endIdx > len(selected) {
+		endIdx = len(selected)
+	}
+
+	// Show items within the current scroll window
+	for i := startIdx; i < endIdx; i++ {
+		target := selected[i]
 		originalIndex := originalIndices[i]
 		shortPath := CleanupItem{target: target, index: originalIndex, model: m}.formatTitle()
-		content.WriteString(fmt.Sprintf("  🗑  %s (%s)\n", shortPath, formatSize(target.Size)))
+		
+		// Ensure paths fit within viewport width
+		maxPathWidth := m.width - 12 // Account for icon and size
+		if len(shortPath) > maxPathWidth {
+			shortPath = shortPath[:maxPathWidth-3] + "..."
+		}
+		
+		itemStyle := lipgloss.NewStyle().Foreground(Colors.Error).PaddingLeft(2)
+		content.WriteString(itemStyle.Render(fmt.Sprintf("🗑  %s (%s)", shortPath, formatSize(target.Size))))
+		content.WriteString("\n")
+	}
+
+	// Show scroll indicators if needed
+	if len(selected) > maxVisibleItems {
+		scrollInfo := ""
+		if m.scrollOffset > 0 {
+			scrollInfo += "↑ "
+		}
+		scrollInfo += fmt.Sprintf("%d-%d of %d", startIdx+1, endIdx, len(selected))
+		if endIdx < len(selected) {
+			scrollInfo += " ↓"
+		}
+		
+		scrollStyle := lipgloss.NewStyle().Foreground(Colors.TextMuted).PaddingLeft(2)
+		content.WriteString(scrollStyle.Render(scrollInfo))
+		content.WriteString("\n")
 	}
 
 	content.WriteString("\n")
-	content.WriteString(helpStyle.Render("y confirm • n cancel"))
+	
+	// Help text that fits in viewport
+	helpText := "Y/y confirm • N/n cancel • ESC go back"
+	if len(selected) > maxVisibleItems {
+		helpText += " • ↑/↓ scroll"
+	}
+	helpStyle := lipgloss.NewStyle().
+		Foreground(Colors.TextSecondary).
+		Italic(true).
+		MaxWidth(m.width - 4)
+	content.WriteString(helpStyle.Render(helpText))
 
 	return content.String()
 }
+
 
 func (m *Model) viewDeleting() string {
 	var content strings.Builder
 
-	header := sectionHeaderStyle.Render("🗑️  Deleting...")
-	content.WriteString(header)
-	content.WriteString("\n\n")
+	// Calculate progress and size information
+	totalItems := len(m.deleteProgress)
+	completedItems := 0
+	var totalSizeToDelete int64
+	var deletedSize int64
+	
+	for _, dp := range m.deleteProgress {
+		totalSizeToDelete += dp.Target.Size
+		if dp.Done {
+			completedItems++
+			deletedSize += dp.Target.Size
+		}
+	}
+	
+	// Header box with deletion metadata (consistent with selection screen)
+	progressPercent := float64(completedItems) / float64(totalItems) * 100
+	deletionHeader := fmt.Sprintf("🗑️  Deleting %d directories • %.0f%% complete • %s of %s freed", 
+		totalItems, progressPercent, formatSize(deletedSize), formatSize(totalSizeToDelete))
+	styledHeader := HeaderContainerStyle().Render(deletionHeader)
+	content.WriteString(styledHeader)
+	content.WriteString("\n")
 
+	// Calculate available height for directory list with scrolling support
+	reservedLines := 5 // Header + help + padding
+	availableHeight := m.height - reservedLines
+	maxVisibleItems := availableHeight / 2 // Each item takes ~2 lines (status + progress)
+	if maxVisibleItems < 1 {
+		maxVisibleItems = 1
+	}
+
+	// Individual item progress with scrolling
 	sortedIndices := m.getSortedProgressIndices()
-	for _, i := range sortedIndices {
+	startIdx := m.scrollOffset
+	endIdx := startIdx + maxVisibleItems
+	if endIdx > len(sortedIndices) {
+		endIdx = len(sortedIndices)
+	}
+
+	// Show items within the current scroll window
+	for idx := startIdx; idx < endIdx; idx++ {
+		i := sortedIndices[idx]
 		dp := m.deleteProgress[i]
 
 		status := "⏳"
+		statusColor := Colors.Warning // Yellow for in progress
 		if dp.Done {
 			status = "✅"
+			statusColor = Colors.Success // Green for done
 		} else if dp.Error != nil {
 			status = "❌"
+			statusColor = Colors.Error // Red for error
 		}
 
 		shortPath := CleanupItem{target: dp.Target, index: i, model: m}.formatTitle()
-		content.WriteString(fmt.Sprintf("%s %s (%s)\n", status, shortPath, formatSize(dp.Target.Size)))
+		
+		// Ensure paths fit within viewport width
+		maxPathWidth := m.width - 12 // Account for icon and size
+		if len(shortPath) > maxPathWidth {
+			shortPath = shortPath[:maxPathWidth-3] + "..."
+		}
+		
+		// Status and file info
+		statusStyle := lipgloss.NewStyle().Foreground(statusColor).Bold(true)
+		pathStyle := lipgloss.NewStyle().Foreground(Colors.TextPrimary)
+		sizeStyle := lipgloss.NewStyle().Foreground(Colors.TextSecondary)
+		
+		content.WriteString(statusStyle.Render(status))
+		content.WriteString(" ")
+		content.WriteString(pathStyle.Render(shortPath))
+		content.WriteString(" ")
+		content.WriteString(sizeStyle.Render(fmt.Sprintf("(%s)", formatSize(dp.Target.Size))))
+		content.WriteString("\n")
 
-		if dp.Done || dp.Error != nil {
-			content.WriteString("    " + strings.Repeat(" ", 48) + "\n") 
-		} else {
+		// Progress bar for active deletions
+		if !dp.Done && dp.Error == nil {
 			progressBar := progress.New(
-				progress.WithScaledGradient("#FF6B6B", "#4ECDC4"),
+				progress.WithScaledGradient(string(Colors.ProgressStart), string(Colors.ProgressEnd)),
 				progress.WithWidth(40),
 			)
-			progressBar.PercentageStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
-			content.WriteString("    ")
+			progressBar.PercentageStyle = lipgloss.NewStyle().Foreground(Colors.Success)
+			
+			content.WriteString("  ")
 			content.WriteString(progressBar.ViewAs(dp.Progress))
 			content.WriteString("\n")
+		} else {
+			// Add spacing for completed items
+			content.WriteString("\n")
 		}
+	}
 
+	// Show scroll indicators if needed
+	if len(sortedIndices) > maxVisibleItems {
+		scrollInfo := ""
+		if m.scrollOffset > 0 {
+			scrollInfo += "↑ "
+		}
+		scrollInfo += fmt.Sprintf("%d-%d of %d", startIdx+1, endIdx, len(sortedIndices))
+		if endIdx < len(sortedIndices) {
+			scrollInfo += " ↓"
+		}
+		
+		scrollStyle := lipgloss.NewStyle().Foreground(Colors.TextMuted).PaddingLeft(2)
+		content.WriteString(scrollStyle.Render(scrollInfo))
 		content.WriteString("\n")
 	}
 
-	content.WriteString(helpStyle.Render("q cancel"))
+	// Help text
+	content.WriteString("\n")
+	if completedItems < totalItems {
+		helpText := "Press Ctrl+C to cancel (not recommended during deletion)"
+		if len(sortedIndices) > maxVisibleItems {
+			helpText += " • ↑/↓ scroll"
+		}
+		content.WriteString(helpStyle.Render(helpText))
+	} else {
+		content.WriteString(helpStyle.Render("Cleanup completed! Exiting..."))
+	}
 
 	return content.String()
 }
 
-func (m *Model) viewSummary() string {
+func (m *Model) viewCompletionDelay() string {
 	var content strings.Builder
 
-	if m.deletedCount == 0 {
-		header := warningContainerStyle.Render("🚫 No directories deleted")
-		content.WriteString(header)
-	} else {
-		resultText := fmt.Sprintf("✅ Deleted %d directories • %s freed", m.deletedCount, formatSize(m.totalFreed))
-		header := containerStyle.Render(resultText)
-		content.WriteString(header)
-	}
-
+	// Success header
+	header := successStyle.Render("✅ Cleanup completed successfully!")
+	content.WriteString(header)
 	content.WriteString("\n\n")
 
-	if m.deletedCount > 0 {
-		sortedIndices := m.getSortedProgressIndices()
-		for _, i := range sortedIndices {
-			dp := m.deleteProgress[i]
-			if dp.Done {
-				shortPath := CleanupItem{target: dp.Target, index: i, model: m}.formatTitle()
-				content.WriteString(fmt.Sprintf("  ✗ %s (%s)\n", shortPath, formatSize(dp.Target.Size)))
-			}
+	// Progress overview
+	totalItems := len(m.deleteProgress)
+	progressInfo := fmt.Sprintf("Cleaned %d directories • %s freed", totalItems, formatSize(m.totalFreed))
+	progressStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true)
+	content.WriteString(progressStyle.Render(progressInfo))
+	content.WriteString("\n\n")
+
+	// Show completed items
+	sortedIndices := m.getSortedProgressIndices()
+	for _, i := range sortedIndices {
+		dp := m.deleteProgress[i]
+		if dp.Done {
+			shortPath := CleanupItem{target: dp.Target, index: i, model: m}.formatTitle()
+			
+			statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true)
+			pathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+			sizeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+			
+			content.WriteString(statusStyle.Render("✅"))
+			content.WriteString(" ")
+			content.WriteString(pathStyle.Render(shortPath))
+			content.WriteString(" ")
+			content.WriteString(sizeStyle.Render(fmt.Sprintf("(%s)", formatSize(dp.Target.Size))))
+			content.WriteString("\n")
 		}
-		content.WriteString("\n")
 	}
 
-	content.WriteString(helpStyle.Render("any key to exit"))
+	content.WriteString("\n")
+	
+	// Auto-exit message
+	exitMessage := "Closing in 5 seconds or press any key to exit immediately"
+	exitStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FBBF24")).
+		Italic(true).
+		Bold(true)
+	content.WriteString(exitStyle.Render(exitMessage))
 
 	return content.String()
 }
+
 
 func (ui *InteractiveUI) SelectTargets() ([]scanner.CleanupTarget, error) {
 	if len(ui.model.targets) == 0 {
@@ -790,12 +996,6 @@ func (ui *InteractiveUI) SelectTargets() ([]scanner.CleanupTarget, error) {
 	return nil, fmt.Errorf("unexpected model type")
 }
 
-func (ui *InteractiveUI) ConfirmDeletion(targets []scanner.CleanupTarget) (bool, error) {
-	return true, nil
-}
-
-func (ui *InteractiveUI) ShowSummary(deletedTargets []scanner.CleanupTarget, totalFreed int64) {
-}
 
 func formatSize(bytes int64) string {
 	const unit = 1024

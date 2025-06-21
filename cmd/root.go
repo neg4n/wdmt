@@ -133,7 +133,7 @@ func performCleanupWithScanner(s *scanner.Scanner) error {
 	targets := s.GetTargets()
 
 	if len(targets) == 0 {
-		fmt.Println("\n✨ no cleanup targets found! your directory is already clean.\n")
+		fmt.Println("✨ no cleanup targets found! your directory is already clean.")
 		return nil
 	}
 
