@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"sync/atomic"
+	"time"
 )
 
 type CleanupTarget struct {
@@ -18,14 +18,11 @@ type CleanupTarget struct {
 }
 
 type Scanner struct {
-	workingDir       string
-	targets          []CleanupTarget
-	progressCallback func(float64)
-	totalDirs        int
-	processedDirs    int
-	numWorkers       int
-	targetsMutex     sync.RWMutex
-	progressMutex    sync.RWMutex
+	workingDir   string
+	targets      []CleanupTarget
+	numWorkers   int
+	targetsMutex sync.RWMutex
+	scanDuration time.Duration
 }
 
 var CommonCleanupDirs = map[string]string{
@@ -71,28 +68,6 @@ func New() (*Scanner, error) {
 	}, nil
 }
 
-func (s *Scanner) ScanWithProgress(progressCallback func(float64)) error {
-	s.targetsMutex.Lock()
-	s.targets = make([]CleanupTarget, 0)
-	s.targetsMutex.Unlock()
-	
-	s.progressMutex.Lock()
-	s.progressCallback = progressCallback
-	s.processedDirs = 0
-	s.progressMutex.Unlock()
-
-	if s.progressCallback != nil {
-		s.progressCallback(0.0)
-	}
-
-	err := s.parallelScanWithProgress(s.workingDir)
-
-	if s.progressCallback != nil {
-		s.progressCallback(1.0)
-	}
-
-	return err
-}
 
 type workItem struct {
 	path string
@@ -104,100 +79,6 @@ type scanResult struct {
 	err    error
 }
 
-func (s *Scanner) parallelScanWithProgress(rootDir string) error {
-	workQueue := make(chan workItem, 1000)
-	resultQueue := make(chan scanResult, 100)
-	var wg sync.WaitGroup
-	var totalDirs int64
-	var processedDirs int64
-
-	wg.Add(s.numWorkers)
-	for i := 0; i < s.numWorkers; i++ {
-		go s.worker(workQueue, resultQueue, &wg, &processedDirs, &totalDirs)
-	}
-
-	go func() {
-		wg.Wait()
-		close(resultQueue)
-	}()
-
-	go func() {
-		defer close(workQueue)
-		s.walkDirectory(rootDir, workQueue, &totalDirs)
-	}()
-
-	for result := range resultQueue {
-		if result.err != nil {
-			continue
-		}
-		
-		if result.target.Path != "" {
-			s.targetsMutex.Lock()
-			s.targets = append(s.targets, result.target)
-			s.targetsMutex.Unlock()
-		}
-
-		if s.progressCallback != nil {
-			processed := atomic.LoadInt64(&processedDirs)
-			total := atomic.LoadInt64(&totalDirs)
-			if total > 0 {
-				progress := float64(processed) / float64(total)
-				if progress > 1.0 {
-					progress = 1.0
-				}
-				s.progressCallback(progress)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (s *Scanner) walkDirectory(dir string, workQueue chan<- workItem, totalDirs *int64) {
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		
-		if info.IsDir() {
-			atomic.AddInt64(totalDirs, 1)
-			select {
-			case workQueue <- workItem{path: path, info: info}:
-			default:
-			}
-			
-			if s.isCleanupTarget(info.Name()) {
-				return filepath.SkipDir
-			}
-		}
-		
-		return nil
-	})
-}
-
-func (s *Scanner) worker(workQueue <-chan workItem, resultQueue chan<- scanResult, wg *sync.WaitGroup, processedDirs *int64, totalDirs *int64) {
-	defer wg.Done()
-	
-	for item := range workQueue {
-		atomic.AddInt64(processedDirs, 1)
-		
-		if s.isCleanupTarget(item.info.Name()) {
-			size := s.calculateDirSizeConcurrent(item.path)
-			
-			target := CleanupTarget{
-				Path:     item.path,
-				Name:     item.info.Name(),
-				Size:     size,
-				Type:     s.getTargetType(item.info.Name()),
-				Selected: false,
-			}
-			
-			resultQueue <- scanResult{target: target, err: nil}
-		} else {
-			resultQueue <- scanResult{target: CleanupTarget{}, err: nil}
-		}
-	}
-}
 
 func (s *Scanner) calculateDirSizeConcurrent(dirPath string) int64 {
 	var size int64
@@ -234,11 +115,16 @@ func (s *Scanner) calculateDirSizeConcurrent(dirPath string) int64 {
 
 
 func (s *Scanner) Scan() error {
+	startTime := time.Now()
+	
 	s.targetsMutex.Lock()
 	s.targets = make([]CleanupTarget, 0)
 	s.targetsMutex.Unlock()
 	
-	return s.parallelScan(s.workingDir)
+	err := s.parallelScan(s.workingDir)
+	s.scanDuration = time.Since(startTime)
+	
+	return err
 }
 
 func (s *Scanner) parallelScan(rootDir string) error {
@@ -344,4 +230,16 @@ func (s *Scanner) GetTargets() []CleanupTarget {
 
 func (s *Scanner) GetWorkingDir() string {
 	return s.workingDir
+}
+
+func (s *Scanner) GetScanDuration() time.Duration {
+	return s.scanDuration
+}
+
+func (s *Scanner) GetScanDurationString() string {
+	duration := s.scanDuration
+	if duration < time.Second {
+		return fmt.Sprintf("%.1fs", duration.Seconds())
+	}
+	return fmt.Sprintf("%.1fs", duration.Seconds())
 }
