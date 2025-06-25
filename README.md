@@ -71,7 +71,7 @@ WDMT uses a **two-phase security model** optimized for both performance and safe
 | Race-condition defence | Vulnerable | N/A (user review) | Just-in-time validation |
 | Filesystem boundaries | Can cross devices | N/A (user review) | Device-ID tracking |
 
-> **Important**  
+> [!IMPORTANT]  
 > The scanner prioritizes speed for discovery, while the cleaner enforces complete security during deletion. **Always review the confirmation screen** to verify what you're deleting, as this is your primary defense against accidental deletions.
 
 ### Supported Targets
