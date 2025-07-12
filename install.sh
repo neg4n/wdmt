@@ -30,13 +30,13 @@ print_error() {
 
 check_go() {
     if ! command -v go &> /dev/null; then
-        print_error "Go is not installed. Please install Go 1.21 or higher."
+        print_error "Go is not installed. Please install Go 1.23 or higher."
         print_status "Visit: https://golang.org/doc/install"
         exit 1
     fi
     
     GO_VERSION=$(go version | grep -o 'go[0-9]\+\.[0-9]\+' | sed 's/go//')
-    REQUIRED_VERSION="1.21"
+    REQUIRED_VERSION="1.23"
     
     if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$GO_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
         print_error "Go version $GO_VERSION found, but $REQUIRED_VERSION or higher is required."

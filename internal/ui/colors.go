@@ -2,68 +2,55 @@ package ui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Color palette for consistent theming across the application
 var Colors = struct {
-	// Primary brand colors
-	Primary    lipgloss.Color // Purple - main accent
-	Secondary  lipgloss.Color // Teal - secondary accent
-	
-	// Status colors
-	Success    lipgloss.Color // Green - success states
-	Warning    lipgloss.Color // Yellow/Orange - warnings
-	Error      lipgloss.Color // Red - errors
-	Info       lipgloss.Color // Blue - informational
-	
-	// Text colors
-	TextPrimary   lipgloss.Color // Primary text
-	TextSecondary lipgloss.Color // Secondary text
-	TextMuted     lipgloss.Color // Muted text
-	TextDim       lipgloss.Color // Dimmed text
-	
-	// Background colors
-	BgPrimary   lipgloss.Color // Primary background
-	BgSecondary lipgloss.Color // Secondary background
-	BgMuted     lipgloss.Color // Muted background
-	
-	// Border colors
-	BorderPrimary   lipgloss.Color // Primary borders
-	BorderSecondary lipgloss.Color // Secondary borders
-	
-	// Progress bar gradient colors
-	ProgressStart lipgloss.Color // Progress bar start color
-	ProgressEnd   lipgloss.Color // Progress bar end color
+	Primary   lipgloss.Color
+	Secondary lipgloss.Color
+
+	Success lipgloss.Color
+	Warning lipgloss.Color
+	Error   lipgloss.Color
+	Info    lipgloss.Color
+
+	TextPrimary   lipgloss.Color
+	TextSecondary lipgloss.Color
+	TextMuted     lipgloss.Color
+	TextDim       lipgloss.Color
+
+	BgPrimary   lipgloss.Color
+	BgSecondary lipgloss.Color
+	BgMuted     lipgloss.Color
+
+	BorderPrimary   lipgloss.Color
+	BorderSecondary lipgloss.Color
+
+	ProgressStart lipgloss.Color
+	ProgressEnd   lipgloss.Color
 }{
-	// Primary brand colors
-	Primary:   lipgloss.Color("#7C3AED"), // Purple
-	Secondary: lipgloss.Color("#4ECDC4"), // Teal
-	
-	// Status colors
-	Success: lipgloss.Color("#10B981"), // Green
-	Warning: lipgloss.Color("#F59E0B"), // Yellow/Orange
-	Error:   lipgloss.Color("#EF4444"), // Red
-	Info:    lipgloss.Color("#3B82F6"), // Blue
-	
-	// Text colors
-	TextPrimary:   lipgloss.Color("#E5E7EB"), // Light gray
-	TextSecondary: lipgloss.Color("#9CA3AF"), // Medium gray
-	TextMuted:     lipgloss.Color("#6B7280"), // Muted gray
-	TextDim:       lipgloss.Color("#4B5563"), // Dim gray
-	
-	// Background colors
-	BgPrimary:   lipgloss.Color("#1F2937"), // Dark gray
-	BgSecondary: lipgloss.Color("#374151"), // Medium dark gray
-	BgMuted:     lipgloss.Color("#065F46"), // Dark green
-	
-	// Border colors
-	BorderPrimary:   lipgloss.Color("#374151"), // Medium dark gray
-	BorderSecondary: lipgloss.Color("#6B7280"), // Muted gray
-	
-	// Progress bar gradient colors
-	ProgressStart: lipgloss.Color("#FF6B6B"), // Red
-	ProgressEnd:   lipgloss.Color("#4ECDC4"), // Teal
+
+	Primary:   lipgloss.Color("#7C3AED"),
+	Secondary: lipgloss.Color("#4ECDC4"),
+
+	Success: lipgloss.Color("#10B981"),
+	Warning: lipgloss.Color("#F59E0B"),
+	Error:   lipgloss.Color("#EF4444"),
+	Info:    lipgloss.Color("#3B82F6"),
+
+	TextPrimary:   lipgloss.Color("#E5E7EB"),
+	TextSecondary: lipgloss.Color("#9CA3AF"),
+	TextMuted:     lipgloss.Color("#6B7280"),
+	TextDim:       lipgloss.Color("#4B5563"),
+
+	BgPrimary:   lipgloss.Color("#1F2937"),
+	BgSecondary: lipgloss.Color("#374151"),
+	BgMuted:     lipgloss.Color("#065F46"),
+
+	BorderPrimary:   lipgloss.Color("#374151"),
+	BorderSecondary: lipgloss.Color("#6B7280"),
+
+	ProgressStart: lipgloss.Color("#FF6B6B"),
+	ProgressEnd:   lipgloss.Color("#4ECDC4"),
 }
 
-// Helper functions for creating common styles
 func SuccessStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(Colors.Success).Bold(true)
 }

@@ -24,8 +24,7 @@ type Scanner struct {
 	numWorkers   int
 	targetsMutex sync.RWMutex
 	scanDuration time.Duration
-	
-	// Object pools for performance
+
 	targetPool sync.Pool
 }
 
@@ -57,10 +56,9 @@ func New() (*Scanner, error) {
 		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Optimal worker count for I/O-bound operations: CPU cores * 3
 	numWorkers := runtime.NumCPU() * 3
 	if numWorkers > 16 {
-		numWorkers = 16 // Cap at 16 to avoid scheduling overhead
+		numWorkers = 16
 	}
 	if numWorkers < 4 {
 		numWorkers = 4
@@ -68,11 +66,10 @@ func New() (*Scanner, error) {
 
 	scanner := &Scanner{
 		workingDir: wd,
-		targets:    make([]CleanupTarget, 0, 64), // Pre-allocate with reasonable capacity
+		targets:    make([]CleanupTarget, 0, 64),
 		numWorkers: numWorkers,
 	}
-	
-	// Initialize object pool
+
 	scanner.targetPool.New = func() interface{} {
 		return &CleanupTarget{}
 	}
@@ -90,97 +87,86 @@ type scanResult struct {
 	err    error
 }
 
-// High-performance directory size calculation using WalkDir
-// Cross-platform approximation of disk usage
 func (s *Scanner) calculateDirSize(dirPath string) int64 {
 	var size int64
-	const blockSize = 4096 // Common filesystem block size (4KB)
-	
+	const blockSize = 4096
+
 	filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // Continue on errors
+			return nil
 		}
-		
-		// Essential security: Never follow symlinks
+
 		if d.Type()&fs.ModeSymlink != 0 {
-			return nil // Skip symlinks entirely
+			return nil
 		}
-		
-		// Calculate size for regular files
+
 		if d.Type().IsRegular() {
 			if info, err := d.Info(); err == nil {
 				fileSize := info.Size()
-				
-				// Approximate disk usage by rounding up to nearest block
-				// This gives a better estimate of actual disk space usage
+
 				if fileSize == 0 {
-					// Empty files still take up space (directory entry, inode, etc.)
+
 					size += blockSize
 				} else {
-					// Round up to nearest block boundary
+
 					blocks := (fileSize + blockSize - 1) / blockSize
 					size += blocks * blockSize
 				}
 			}
 		}
-		
+
 		return nil
 	})
-	
+
 	return size
 }
 
 func (s *Scanner) Scan() error {
 	startTime := time.Now()
-	
+
 	s.targetsMutex.Lock()
-	s.targets = s.targets[:0] // Reuse existing slice
+	s.targets = s.targets[:0]
 	s.targetsMutex.Unlock()
-	
+
 	err := s.parallelScan(s.workingDir)
 	s.scanDuration = time.Since(startTime)
-	
+
 	return err
 }
 
 func (s *Scanner) parallelScan(rootDir string) error {
-	// Channel buffering: 2x worker count for optimal throughput
+
 	bufferSize := s.numWorkers * 2
 	workQueue := make(chan workItem, bufferSize)
 	resultQueue := make(chan scanResult, bufferSize)
-	
+
 	var wg sync.WaitGroup
 
-	// Start workers
 	wg.Add(s.numWorkers)
 	for i := 0; i < s.numWorkers; i++ {
 		go s.worker(workQueue, resultQueue, &wg)
 	}
 
-	// Close result queue when all workers are done
 	go func() {
 		wg.Wait()
 		close(resultQueue)
 	}()
 
-	// Start directory walker
 	go func() {
 		defer close(workQueue)
 		s.walkDirectory(rootDir, workQueue)
 	}()
 
-	// Collect results
 	for result := range resultQueue {
 		if result.err != nil {
 			continue
 		}
-		
+
 		if result.target != nil && result.target.Path != "" {
 			s.targetsMutex.Lock()
 			s.targets = append(s.targets, *result.target)
 			s.targetsMutex.Unlock()
-			
-			// Return target to pool
+
 			s.targetPool.Put(result.target)
 		}
 	}
@@ -188,71 +174,62 @@ func (s *Scanner) parallelScan(rootDir string) error {
 	return nil
 }
 
-// High-performance directory walking using WalkDir
 func (s *Scanner) walkDirectory(dir string, workQueue chan<- workItem) {
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // Continue on errors
+			return nil
 		}
-		
-		// Essential security: Never follow symlinks
+
 		if d.Type()&fs.ModeSymlink != 0 {
-			return nil // Skip symlinks entirely
+			return nil
 		}
-		
-		// Use DirEntry.Type() to avoid expensive stat calls
+
 		if d.Type().IsDir() {
 			name := d.Name()
-			
-			// Early termination: check if this is a cleanup target
+
 			if s.isCleanupTarget(name) {
-				// Send to worker for processing
+
 				select {
 				case workQueue <- workItem{path: path, entry: d}:
 				default:
-					// Queue full, skip this item (graceful degradation)
+
 				}
-				
-				// Skip scanning inside cleanup targets
+
 				return filepath.SkipDir
 			}
 		}
-		
+
 		return nil
 	})
 }
 
 func (s *Scanner) worker(workQueue <-chan workItem, resultQueue chan<- scanResult, wg *sync.WaitGroup) {
 	defer wg.Done()
-	
+
 	for item := range workQueue {
 		name := item.entry.Name()
-		
-		// Essential security: Ensure target is not a symlink
+
 		if item.entry.Type()&fs.ModeSymlink != 0 {
-			continue // Skip symlinks
+			continue
 		}
-		
+
 		if s.isCleanupTarget(name) {
-			// Get target from pool
+
 			target := s.targetPool.Get().(*CleanupTarget)
-			
-			// Calculate size efficiently
+
 			size := s.calculateDirSize(item.path)
-			
-			// Populate target
+
 			target.Path = item.path
 			target.Name = name
 			target.Size = size
 			target.Type = s.getTargetType(name)
 			target.Selected = false
-			
+
 			resultQueue <- scanResult{target: target, err: nil}
 		}
 	}
 }
 
-// Optimized cleanup target detection using map lookup
 func (s *Scanner) isCleanupTarget(name string) bool {
 	_, exists := CommonCleanupDirs[name]
 	return exists
@@ -268,8 +245,7 @@ func (s *Scanner) getTargetType(name string) string {
 func (s *Scanner) GetTargets() []CleanupTarget {
 	s.targetsMutex.RLock()
 	defer s.targetsMutex.RUnlock()
-	
-	// Return a copy to prevent race conditions
+
 	targets := make([]CleanupTarget, len(s.targets))
 	copy(targets, s.targets)
 	return targets
@@ -291,7 +267,6 @@ func (s *Scanner) GetScanDurationString() string {
 	return fmt.Sprintf("%.1fs", duration.Seconds())
 }
 
-// CalculateDirectorySize exposes the directory size calculation for testing
 func (s *Scanner) CalculateDirectorySize(dirPath string) int64 {
 	return s.calculateDirSize(dirPath)
 }

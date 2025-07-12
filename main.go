@@ -1,9 +1,9 @@
 package main
 
 import (
-	"wdmt/cmd"
+	"github.com/neg4n/wdmt/cmd"
 )
 
 func main() {
 	cmd.Execute()
-} 
+}
