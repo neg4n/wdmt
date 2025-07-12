@@ -28,7 +28,15 @@ Large dependency folders and build outputs quickly bloat local check-outs.  Manu
 - **🎯 Secure by Design** — Robust security validation  
 - **📱 Cross-Platform** — Works on macOS, Linux, and Windows  
 - **🔍 Enhanced Path Display** — Smart, condensed, and full path viewing modes with keyboard shortcuts  
-- **📏 Accurate Size Calculation** — Block-based size estimation (4KB blocks) matches actual disk usage
+- **📏 Accurate Size Calculation** — Uses 4KB block size to match actual disk usage
+- **🚀 Zero Configuration** — Works out of the box with sensible defaults, no config files needed
+
+### Built With
+
+- **[Cobra](https://github.com/spf13/cobra)** — CLI framework for building commands
+- **[Bubble Tea](https://github.com/charmbracelet/bubbletea)** — Terminal UI framework
+- **[Lipgloss](https://github.com/charmbracelet/lipgloss)** — Terminal styling and layout
+- **[Bubbles](https://github.com/charmbracelet/bubbles)** — TUI components (lists, progress bars, spinners)
 
 ### Quick Start
 
@@ -51,13 +59,27 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/neg4n/wdm
 3. Run `wdmt` in the terminal
 4. Follow the interactive prompts to select and delete directories
 
+#### Interactive Controls
+
+During the selection phase:
+- **↑/↓** or **j/k** — Navigate through the list
+- **Space** or **Enter** — Select/deselect items
+- **a** — Select all items
+- **A** — Deselect all items
+- **p** — Cycle through path display modes (smart → condensed → full)
+- **?** — Toggle help
+- **q** or **Ctrl+C** — Quit
+
+During deletion:
+- **Any key** — Skip the 5-second completion delay
+
 ### Security Architecture
 
 WDMT uses a **two-phase security model** optimized for both performance and safety:
 
 #### **Discovery Phase (Scanner)**
 - **🔍 Fast & Minimal Security** — Essential symlink detection for safe directory traversal
-- **⚡ Performance Optimized** — Lightweight validation enables sub-second scanning
+- **⚡ Performance Optimized** — Parallel scanning with CPU×3 workers for fast discovery
 - **👀 User Review Required** — Always displays confirmation screen before deletion
 
 #### **Deletion Phase (Cleaner)**
@@ -87,6 +109,9 @@ WDMT detects and cleans the following artefacts:
 | Bundler cache | `.parcel-cache`, `.webpack`, `.rollup.cache` |
 | Temporary | `tmp`, `temp`, `.cache` |
 | System files | `.DS_Store`, `Thumbs.db` |
+
+> [!NOTE]  
+> Target directories are currently hardcoded for security and simplicity but will be configurable in future releases.
 
 ### Development
 

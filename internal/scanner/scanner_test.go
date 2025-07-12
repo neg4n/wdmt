@@ -210,7 +210,7 @@ func TestScan(t *testing.T) {
 	}
 
 	targets := scanner.GetTargets()
-	if len(targets) != 2 { 
+	if len(targets) != 2 {
 		t.Errorf("Expected 2 targets, got %d", len(targets))
 	}
 }
@@ -222,7 +222,6 @@ func TestCalculateDirSize(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Change to temp directory to make it the working directory
 	originalWd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
@@ -235,14 +234,14 @@ func TestCalculateDirSize(t *testing.T) {
 	}
 
 	testFile1 := filepath.Join(tempDir, "file1.txt")
-	content1 := "hello world" 
+	content1 := "hello world"
 	err = os.WriteFile(testFile1, []byte(content1), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
 	testFile2 := filepath.Join(tempDir, "file2.txt")
-	content2 := "test" 
+	content2 := "test"
 	err = os.WriteFile(testFile2, []byte(content2), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -255,7 +254,7 @@ func TestCalculateDirSize(t *testing.T) {
 	}
 
 	testFile3 := filepath.Join(subDir, "file3.txt")
-	content3 := "sub" 
+	content3 := "sub"
 	err = os.WriteFile(testFile3, []byte(content3), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test file in subdirectory: %v", err)
@@ -268,15 +267,12 @@ func TestCalculateDirSize(t *testing.T) {
 
 	size := scanner.calculateDirSize(tempDir)
 
-	// With block-based calculation, size should be larger than logical size
-	// due to block allocation (typically 4KB blocks)
 	logicalSize := int64(len(content1) + len(content2) + len(content3))
 	if size < logicalSize {
 		t.Errorf("Block-based size %d should be >= logical size %d", size, logicalSize)
 	}
-	
-	// Reasonable upper bound check (each file gets at least one block)
-	maxExpectedSize := logicalSize + (3 * 4096) // 3 files * typical 4KB block size
+
+	maxExpectedSize := logicalSize + (3 * 4096)
 	if size > maxExpectedSize {
 		t.Errorf("Size %d seems too large (logical: %d, max expected: %d)", size, logicalSize, maxExpectedSize)
 	}

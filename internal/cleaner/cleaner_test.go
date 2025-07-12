@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"wdmt/internal/scanner"
+	"github.com/neg4n/wdmt/internal/scanner"
 )
 
 func createSafeTestEnv(t *testing.T) (string, func()) {
@@ -349,7 +349,7 @@ func TestSeparationOfConcerns_ScannerAndCleaner(t *testing.T) {
 		},
 		{
 			Path:     unsafeDir,
-			Name:     "unsafe_symlink", 
+			Name:     "unsafe_symlink",
 			Size:     512,
 			Type:     "Unknown",
 			Selected: true,

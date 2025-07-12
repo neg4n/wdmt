@@ -8,12 +8,12 @@ import (
 	"syscall"
 	"unicode/utf8"
 
-	"wdmt/internal/scanner"
+	"github.com/neg4n/wdmt/internal/scanner"
 )
 
 type Cleaner struct {
 	workingDir    string
-	workingDirDev uint64 
+	workingDirDev uint64
 }
 
 type SecurityError struct {
@@ -58,6 +58,9 @@ func New(workingDir string) (*Cleaner, error) {
 	}, nil
 }
 
+func (c *Cleaner) DeleteDirectory(path string) error {
+	return c.secureDeleteDirectory(path)
+}
 
 func (c *Cleaner) secureDeleteDirectory(path string) error {
 	if err := c.validatePathSecurity(path); err != nil {
@@ -248,4 +251,3 @@ func (c *Cleaner) ValidateTargets(targets []scanner.CleanupTarget) ([]scanner.Cl
 
 	return validTargets, nil
 }
-
